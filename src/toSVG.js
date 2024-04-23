@@ -330,49 +330,102 @@ const entityToBoundsAndElement = (entity) => {
   }
 }
 
-export default (parsed) => {
-  const entities = denormalise(parsed)
-  const { bbox, elements } = entities.reduce(
-    (acc, entity, i) => {
-      const rgb = getRGBForEntity(parsed.tables.layers, entity)
-      const boundsAndElement = entityToBoundsAndElement(entity)
-      // Ignore entities like MTEXT that don't produce SVG elements
-      if (boundsAndElement) {
-        const { bbox, element } = boundsAndElement
-        // Ignore invalid bounding boxes
-        if (bbox.valid) {
-          acc.bbox.expandByPoint(bbox.min)
-          acc.bbox.expandByPoint(bbox.max)
-        }
-        acc.elements.push(
-          `<g stroke="${rgbToColorAttribute(rgb)}">${element}</g>`,
-        )
-      }
-      return acc
-    },
-    {
-      bbox: new Box2(),
-      elements: [],
-    },
-  )
 
-  const viewBox = bbox.valid
-    ? {
-        x: bbox.min.x,
-        y: -bbox.max.y,
-        width: bbox.max.x - bbox.min.x,
-        height: bbox.max.y - bbox.min.y,
+
+// Flag que controla a forma de agrupamento dos elementos SVG
+const createSVGgroupbyLayer = true;
+
+// Função exportada padrão que processa 'parsed' com base no valor de 'createSVGgroupbyLayer'
+export default (parsed) => {
+  if (createSVGgroupbyLayer) {
+    const entities = denormalise(parsed);
+    const layers = {};
+
+    entities.forEach(entity => {
+      const boundsAndElement = entityToBoundsAndElement(entity);
+      if (boundsAndElement) {
+        const { bbox, element } = boundsAndElement;
+        const layer = entity.layer;
+        layers[layer] = layers[layer] || { bbox: new Box2(), elements: [] };
+
+        if (bbox.valid) {
+          layers[layer].bbox.expandByPoint(bbox.min).expandByPoint(bbox.max);
+        }
+        layers[layer].elements.push(`<g stroke="${rgbToColorAttribute(rgb)}">${element}</g>`);
       }
-    : {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-      }
-  return `<?xml version="1.0"?>
+    });
+
+    // Calcula o viewBox global baseado nas bounding boxes de todas as camadas
+    const globalBBox = new Box2();
+    Object.values(layers).forEach(layer => {
+      globalBBox.expandByPoint(layer.bbox.min).expandByPoint(layer.bbox.max);
+    });
+
+    const viewBox = globalBBox.valid ? {
+      x: globalBBox.min.x,
+      y: -globalBBox.max.y,
+      width: globalBBox.max.x - globalBBox.min.x,
+      height: globalBBox.max.y - globalBBox.min.y,
+    } : {
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 1000,
+    };
+
+    let svgContent = `<?xml version="1.0"?>
 <svg
   xmlns="http://www.w3.org/2000/svg"
-  xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1"
+  xmlns:xlink="http://www.w3.org/1999/xlink"
+  version="1.1"
+  preserveAspectRatio="xMinYMin meet"
+  viewBox="${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}"
+  width="100%"
+  height="100%"
+>\n`;
+
+    Object.keys(layers).forEach(layer => {
+      svgContent += `<g id="${layer}" stroke="#000000" stroke-width="0.1%" fill="none" transform="matrix(1,0,0,-1,0,0)">\n`;
+      svgContent += layers[layer].elements.join('\n');
+      svgContent += `</g>\n`;
+    });
+
+    svgContent += `</svg>`;
+
+    return svgContent; // Retorna o SVG completo
+  } else {
+    const entities = denormalise(parsed);
+    const { bbox, elements } = entities.reduce((acc, entity) => {
+      const rgb = getRGBForEntity(parsed.tables.layers, entity);
+      const boundsAndElement = entityToBoundsAndElement(entity);
+      if (boundsAndElement) {
+        const { bbox, element } = boundsAndElement;
+        if (bbox.valid) {
+          acc.bbox.expandByPoint(bbox.min);
+          acc.bbox.expandByPoint(bbox.max);
+        }
+        acc.elements.push(`<g stroke="${rgbToColorAttribute(rgb)}">${element}</g>`);
+      }
+      return acc;
+    }, { bbox: new Box2(), elements: [] });
+
+    const viewBox = bbox.valid ? {
+      x: bbox.min.x,
+      y: -bbox.max.y,
+      width: bbox.max.x - bbox.min.x,
+      height: bbox.max.y - bbox.min.y,
+    } : {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+    };
+
+    return `<?xml version="1.0"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  xmlns:xlink="http://www.w3.org/1999/xlink"
+  version="1.1"
   preserveAspectRatio="xMinYMin meet"
   viewBox="${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}"
   width="100%" height="100%"
@@ -380,5 +433,6 @@ export default (parsed) => {
   <g stroke="#000000" stroke-width="0.1%" fill="none" transform="matrix(1,0,0,-1,0,0)">
     ${elements.join('\n')}
   </g>
-</svg>`
-}
+</svg>`;
+  }
+};
